@@ -14,10 +14,10 @@ description: Use the herdr-app desktop app as an alternative multiplexer backend
 | Scope                | tmux server          | herdr-core         |
 | Pane sizing          | `size`, `percentage` | Splits in half     |
 
-- **Terminology**: A workmux "session" is a herdr-app space, a "window" is a tab, and a "pane" is a pane. Pane IDs are hc terminal addresses such as `t7`.
-- **Session mode**: Supported, as on tmux. Each worktree gets its own space, and `windows:` layouts work.
-- **Worktrees**: herdr-app keeps no record of which worktree a space belongs to, so it doesn't tell its own worktrees from the ones workmux creates with git. workmux worktrees show up in herdr-app just like the ones herdr-app creates.
-- **Agent status**: workmux tracks agent status as usual and shows it in the [dashboard](/guide/dashboard/). It doesn't write status icons into tab names, because herdr-app already shows each agent's state.
+- **Terminology**: workmux sessions, windows and panes are herdr-app spaces, tabs and panes.
+- **Session mode**: Supported. Each worktree gets its own space.
+- **Worktrees**: herdr-app doesn't tell its own worktrees from the ones workmux creates, so both show up the same.
+- **Agent status**: herdr-app shows it, so workmux leaves tab names alone. The [dashboard](/guide/dashboard/) works as usual.
 
 ## Requirements
 
