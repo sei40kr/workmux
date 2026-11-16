@@ -159,6 +159,7 @@ export default defineConfig({
             { label: "kitty", slug: "guide/kitty" },
             { label: "WezTerm", slug: "guide/wezterm" },
             { label: "Zellij", slug: "guide/zellij" },
+            { label: "herdr-app", slug: "guide/herdr-app" },
             { label: "Rex", slug: "guide/rex" },
           ],
         },

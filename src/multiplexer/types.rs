@@ -306,6 +306,8 @@ pub enum BackendType {
     Zellij,
     /// Rex backend
     Rex,
+    /// herdr-app backend
+    HerdrApp,
 }
 
 impl std::fmt::Display for BackendType {
@@ -316,18 +318,20 @@ impl std::fmt::Display for BackendType {
             BackendType::Kitty => write!(f, "kitty"),
             BackendType::Zellij => write!(f, "zellij"),
             BackendType::Rex => write!(f, "rex"),
+            BackendType::HerdrApp => write!(f, "herdr-app"),
         }
     }
 }
 
 impl BackendType {
     /// Every backend, in the order they are listed to users.
-    pub const ALL: [BackendType; 5] = [
+    pub const ALL: [BackendType; 6] = [
         BackendType::Tmux,
         BackendType::WezTerm,
         BackendType::Kitty,
         BackendType::Zellij,
         BackendType::Rex,
+        BackendType::HerdrApp,
     ];
 
     /// The accepted `WORKMUX_BACKEND` values, as "tmux|wezterm|...".

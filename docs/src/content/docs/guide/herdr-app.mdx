@@ -1,0 +1,48 @@
+---
+title: "herdr-app"
+description: Use the herdr-app desktop app as an alternative multiplexer backend
+---
+
+:::caution[Experimental]
+The herdr-app backend is new and experimental. Expect rough edges and potential issues.
+:::
+
+[herdr-app](https://herdr.dev) can be used as an alternative to tmux. It is detected automatically via `$HC_TERMINAL_ID`, which herdr-core (`hc`) sets in every terminal it runs.
+
+## Differences from tmux
+
+| Feature              | tmux                 | herdr-app          |
+| -------------------- | -------------------- | ------------------ |
+| Agent status in tabs | Yes (window names)   | Shown by herdr-app |
+| Tab ordering         | Insert after current | Appends to end     |
+| Scope                | tmux server          | herdr-core         |
+| Pane sizing          | `size`, `percentage` | Splits in half     |
+
+- **Terminology**: A workmux "session" is a herdr-app space, a "window" is a tab, and a "pane" is a pane. Pane IDs are hc terminal addresses such as `t7`.
+- **Session mode**: Supported, as on tmux. Each worktree gets its own space, and `windows:` layouts work.
+- **Worktrees**: workmux creates worktrees with git as usual. herdr-app's own worktree dialogs are not involved, and it keeps no record of which worktree a space belongs to.
+- **Agent status**: workmux tracks agent status as usual and shows it in the [dashboard](/guide/dashboard/). It doesn't write status icons into tab names, because herdr-app already shows each agent's state.
+
+## Requirements
+
+- herdr-app open, with the `herdr-app` and `hc` CLIs on your `PATH`
+- workmux run from inside a herdr-app terminal, so `$HC_TERMINAL_ID` and `$HC_TERMINAL_SOCKET` are set
+
+## How it talks to herdr-app
+
+workmux changes the layout through `herdr-app do` and reads it with `herdr-app ls`. It reads and types into terminals through `hc`, and lists every terminal's process and folder with one `hc connect` call.
+
+## Testing
+
+A unit test drives every backend method against the running herdr-app. Run the test binary from a terminal inside herdr-app; it creates tabs and spaces named `wmt-*` and closes them again:
+
+```bash
+cargo test every_method_against_the_running_app -- --ignored
+```
+
+## Known limitations
+
+- hc can type text without pressing Enter only as named keys, so text with shifted symbols (`!`, `$`, `|`, ...) or non-ASCII characters can't be typed without submitting it. Commands, prompts and pastes that submit work with any text. Claude Code's `!` bash commands sent with `workmux send` fail for this reason.
+- Tab insertion ordering is not supported (new tabs always appear at the end)
+- Pane `size` and `percentage` are ignored
+- The [sidebar](/guide/sidebar/) is not supported

@@ -596,7 +596,7 @@ impl RexBackend {
     }
 
     /// Translate tmux key names (used across workmux) to Rex key syntax.
-    fn rex_key(key: &str) -> String {
+    pub(crate) fn rex_key(key: &str) -> String {
         match key {
             "Enter" => "enter".to_string(),
             "Escape" => "escape".to_string(),

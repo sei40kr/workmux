@@ -7,6 +7,7 @@ pub mod agent;
 pub mod conversation;
 pub mod handle;
 pub mod handshake;
+pub mod herdr_app;
 pub mod kitty;
 pub mod rex;
 pub mod tmux;
@@ -1072,7 +1073,8 @@ pub trait Multiplexer: Send + Sync {
 /// 4. `$ZELLIJ`, `$ZELLIJ_PANE_ID`, or `$ZELLIJ_SESSION_NAME` set → Zellij
 /// 5. `$KITTY_WINDOW_ID` set → Kitty
 /// 6. `$REX_BLOCK` set (and not empty) → Rex
-/// 7. None → defaults to tmux (for backward compatibility)
+/// 7. `$HC_TERMINAL_ID` set (and not empty) → herdr-app
+/// 8. None → defaults to tmux (for backward compatibility)
 ///
 /// This ordering ensures that running tmux inside kitty (or wezterm) correctly
 /// selects the innermost multiplexer.
@@ -1116,6 +1118,7 @@ struct BackendSignals {
     zellij: bool,
     kitty: bool,
     rex: bool,
+    herdr_app: bool,
 }
 
 fn detect_backend_from_environment() -> BackendType {
@@ -1127,6 +1130,7 @@ fn detect_backend_from_environment() -> BackendType {
             || std::env::var("ZELLIJ_SESSION_NAME").is_ok(),
         kitty: std::env::var("KITTY_WINDOW_ID").is_ok(),
         rex: rex::in_rex_terminal(),
+        herdr_app: herdr_app::in_herdr_app_terminal(),
     })
 }
 
@@ -1154,6 +1158,12 @@ fn resolve_backend(signals: BackendSignals) -> BackendType {
         return BackendType::Rex;
     }
 
+    // Last for the same reason: terminals started from an hc terminal inherit
+    // HC_TERMINAL_ID
+    if signals.herdr_app {
+        return BackendType::HerdrApp;
+    }
+
     BackendType::Tmux
 }
 
@@ -1165,6 +1175,7 @@ pub fn create_backend(backend_type: BackendType) -> Arc<dyn Multiplexer> {
         BackendType::Kitty => Arc::new(kitty::KittyBackend::new()),
         BackendType::Zellij => Arc::new(zellij::ZellijBackend::new()),
         BackendType::Rex => Arc::new(rex::RexBackend::new()),
+        BackendType::HerdrApp => Arc::new(herdr_app::HerdrAppBackend::new()),
     }
 }
 
@@ -1418,6 +1429,29 @@ mod tests {
             resolve_backend(BackendSignals {
                 tmux: true,
                 rex: true,
+                ..Default::default()
+            }),
+            BackendType::Tmux
+        );
+    }
+
+    #[test]
+    fn herdr_app_only() {
+        assert_eq!(
+            resolve_backend(BackendSignals {
+                herdr_app: true,
+                ..Default::default()
+            }),
+            BackendType::HerdrApp
+        );
+    }
+
+    #[test]
+    fn tmux_inside_herdr_app() {
+        assert_eq!(
+            resolve_backend(BackendSignals {
+                tmux: true,
+                herdr_app: true,
                 ..Default::default()
             }),
             BackendType::Tmux
