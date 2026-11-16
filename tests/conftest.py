@@ -732,6 +732,304 @@ class WezTermEnvironment(MuxEnvironment):
         self.env["SHELL"] = shell
 
 
+class HerdrAppEnvironment(MuxEnvironment):
+    """
+    herdr-app-specific test environment.
+
+    Each test starts its own herdr-core and herdr-app window, like the Rex
+    tests start their own server. Both get the isolated environment, so every
+    terminal (including the ones workmux creates) inherits HOME, PATH and the
+    XDG directories. On macOS the window opens in the background, so it
+    doesn't take focus, and is minimized. The user's herdr-app and
+    herdr-core are never touched.
+    """
+
+    # Keys hc can press for each character typed without Enter
+    _KEY_NAMES = {" ": "space", "\n": "enter", "\t": "tab"}
+
+    def __init__(self, tmp_path: Path):
+        super().__init__(tmp_path)
+
+        # Short directory, to stay under the macOS limit for the Unix sockets
+        # of both the core and the window
+        self.runtime_dir = Path(tempfile.mkdtemp(prefix="hc_"))
+        self.app_home = self.runtime_dir / "app"
+        self.app_home.mkdir()
+        # Without it, a new window opens on its welcome screen
+        (self.app_home / "shared.json").write_text('{"frame.welcomed": "finished"}')
+        self.app_process: Optional[subprocess.Popen] = None
+        self.space_id: Optional[str] = None
+        self.runner_terminal: Optional[str] = None
+
+        # Keep the tests off any multiplexer the test run itself is inside
+        for key in (
+            "TMUX",
+            "TMUX_PANE",
+            "WEZTERM_PANE",
+            "REX_SESSION",
+            "REX_BLOCK",
+            "HC_TERMINAL_ID",
+            "HC_TERMINAL_SOCKET",
+            "HC_SCOPE",
+        ):
+            self.env.pop(key, None)
+        self.env["HC_SESSION"] = "workmux-test"
+        self.env["HC_SOCKET"] = str(self.runtime_dir / "hc.sock")
+        self.env["HERDR_APP_HOME"] = str(self.app_home)
+
+    @property
+    def backend_name(self) -> str:
+        return "herdr-app"
+
+    session_switch_fails = False
+
+    def _app_ready(self) -> bool:
+        return self.mux_command(["status"], check=False).returncode == 0
+
+    def start_server(self) -> None:
+        """Start a private core and window, and a 'test' space with one tab."""
+        self.hc(["server", "start"])
+        log = self.runtime_dir / "app.log"
+        app = Path(os.path.realpath(shutil.which("herdr-app") or "herdr-app"))
+        bundle = app.parents[2]
+        if bundle.suffix == ".app":
+            # Running the binary directly brings the window to the front.
+            # `open -g` starts a new instance without taking focus.
+            args = ["open", "-n", "-g", "-j", "-a", str(bundle)]
+            args += ["--stdout", str(log), "--stderr", str(log)]
+            for key, value in self.env.items():
+                args += ["--env", f"{key}={value}"]
+            self.run_command(args)
+        else:
+            # The window keeps its own copy of the log file's descriptor
+            with open(log, "w") as log_file:
+                self.app_process = subprocess.Popen(
+                    ["herdr-app"],
+                    cwd=self.tmp_path,
+                    env=self.env,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                )
+        if not poll_until(self._app_ready, timeout=30.0):
+            raise RuntimeError(
+                "herdr-app test window did not start:\n" + log.read_text()
+            )
+        self._do("window.minimize", {})
+
+        shell = self.env.get("SHELL", "/bin/sh")
+        created = self._do(
+            "space.new",
+            {
+                "name": "test",
+                "folder": str(self.tmp_path),
+                "tab": "test",
+                "argv": [shell, "-l"],
+            },
+        )
+        self.space_id = created["space"]
+        self.runner_terminal = created["terminal"]
+
+    def stop_server(self) -> None:
+        """Close the private window, then stop the core and its terminals."""
+        # Reaches only the private window, through its own socket
+        self.mux_command(["do", "app.quit", "{}"], check=False)
+        poll_until(lambda: not self._app_ready(), timeout=10.0)
+        if self.app_process is not None:
+            self.app_process.terminate()
+            try:
+                self.app_process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.app_process.kill()
+            self.app_process = None
+        self.hc(["server", "stop"], check=False)
+        self.space_id = None
+        shutil.rmtree(self.runtime_dir, ignore_errors=True)
+
+    def mux_command(
+        self, args: list[str], check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a herdr-app CLI command against the private window."""
+        return self.run_command(["herdr-app"] + args, check=check)
+
+    def hc(
+        self, args: list[str], check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        """Run an hc command against the private core."""
+        return self.run_command(["hc"] + args, check=check)
+
+    def _do(self, command: str, args: dict) -> dict:
+        result = self.mux_command(["do", command, json.dumps(args)])
+        return json.loads(result.stdout)
+
+    def _spaces(self) -> list[dict]:
+        return json.loads(self.mux_command(["ls"]).stdout).get("spaces") or []
+
+    def _tabs(self) -> list[dict]:
+        for space in self._spaces():
+            if space["id"] == self.space_id:
+                return space.get("tabs") or []
+        return []
+
+    def _find_tab(self, window_name: str) -> Optional[dict]:
+        for tab in self._tabs():
+            if tab.get("name") == window_name:
+                return tab
+        return None
+
+    def _require_tab(self, window_name: str) -> dict:
+        tab = self._find_tab(window_name)
+        if not tab:
+            raise RuntimeError(f"Window '{window_name}' not found in space")
+        return tab
+
+    def _active_tab(self) -> Optional[dict]:
+        for tab in self._tabs():
+            if tab.get("active"):
+                return tab
+        return None
+
+    def _focused_terminal(self, tab: dict) -> Optional[str]:
+        """The terminal of the tab's focused pane when the window shows the
+        tab, otherwise the tab's first terminal."""
+        terminals = [t for t in tab.get("terminals") or [] if t.get("terminal")]
+        status = json.loads(self.mux_command(["status"]).stdout)
+        if status.get("tab") == tab["id"]:
+            for t in terminals:
+                if t["pane"] == status.get("focused_pane"):
+                    return t["terminal"]
+        return terminals[0]["terminal"] if terminals else None
+
+    def _window_terminal(self, window_name: str) -> Optional[str]:
+        tab = self._find_tab(window_name)
+        return self._focused_terminal(tab) if tab else None
+
+    def _target_terminal(self, target: str) -> str:
+        """Resolve a send target. 'test:' means the active tab, like tmux."""
+        if target == "test:":
+            tab = self._active_tab()
+            terminal = self._focused_terminal(tab) if tab else None
+            if terminal:
+                return terminal
+            assert self.runner_terminal is not None, "herdr-app has not been started"
+            return self.runner_terminal
+        terminal = self._focused_terminal(self._require_tab(target))
+        if not terminal:
+            raise RuntimeError(f"Window '{target}' has no terminals")
+        return terminal
+
+    def list_windows(self) -> list[str]:
+        """List tab names in the test space."""
+        return [t["name"] for t in self._tabs() if t.get("name")]
+
+    def list_window_ids(self) -> list[str]:
+        """List tab IDs, which survive renames."""
+        return [t["id"] for t in self._tabs()]
+
+    def capture_pane(self, window_name: str) -> Optional[str]:
+        """Capture the screen of a tab's focused terminal."""
+        terminal = self._window_terminal(window_name)
+        if not terminal:
+            return None
+        result = self.hc(["read", "--", terminal], check=False)
+        return result.stdout if result.returncode == 0 else None
+
+    def _send(self, terminal: str, text: str, enter: bool) -> None:
+        if enter and text:
+            # Pastes the text and presses Enter; any text works
+            self.hc(["send", "--force", "--", terminal, text])
+        elif enter:
+            self.hc(["keys", "--", terminal, "enter"])
+        elif text:
+            # hc types without Enter only through named keys
+            keys = [self._KEY_NAMES.get(c, c) for c in text]
+            self.hc(["keys", "--", terminal, *keys])
+
+    def send_keys(self, target: str, text: str, enter: bool = True) -> None:
+        """Send text to the active tab ('test:') or a tab's focused terminal."""
+        self._send(self._target_terminal(target), text, enter)
+
+    def run_shell_background(self, script: str) -> None:
+        """Run from the runner terminal, independently of the active worktree tab."""
+        assert self.runner_terminal is not None, "herdr-app has not been started"
+        command = make_env_script(self, script, {})
+        self._send(self.runner_terminal, f"nohup {command} >/dev/null 2>&1 &", True)
+
+    def set_session_env(self, key: str, value: str) -> None:
+        """Set an environment variable via shell export in the active tab."""
+        self.send_keys("test:", f"export {key}={shlex.quote(value)}", enter=True)
+
+    def kill_window(self, window_name: str) -> None:
+        """Close a tab by name. Raises if it doesn't exist."""
+        tab = self._require_tab(window_name)
+        self._do("tab.close", {"id": tab["id"], "confirmed": True})
+
+    def get_current_window(self) -> Optional[str]:
+        """Get the name of the test space's active tab."""
+        tab = self._active_tab()
+        return tab.get("name") if tab else None
+
+    def select_window(self, window_name: str) -> None:
+        """Show a tab by name. Raises if it doesn't exist."""
+        tab = self._require_tab(window_name)
+        self._do("tab.select", {"id": tab["id"]})
+
+    def new_window(self, name: Optional[str] = None, detached: bool = False) -> None:
+        """Create a new tab in the test space."""
+        shown = json.loads(self.mux_command(["status"]).stdout).get("tab")
+        args: dict[str, Any] = {"space": self.space_id, "folder": str(self.tmp_path)}
+        if name:
+            args["name"] = name
+        self._do("tab.new", args)
+        # herdr-app shows every new tab
+        if detached and shown:
+            self._do("tab.select", {"id": shown})
+
+    def configure_default_shell(self, shell: str) -> None:
+        """herdr-app has no default-shell option; set SHELL for workmux to read."""
+        self.env["SHELL"] = shell
+
+    def list_sessions(self) -> list[str]:
+        """List space names in the private window."""
+        return [s["name"] for s in self._spaces() if s.get("name")]
+
+    def _find_space(self, session_name: str) -> dict:
+        for space in self._spaces():
+            if space.get("name") == session_name:
+                return space
+        raise RuntimeError(f"Session '{session_name}' not found")
+
+    def new_session(self, session_name: str) -> None:
+        """Create a space in the private window, without showing it."""
+        shown = json.loads(self.mux_command(["status"]).stdout).get("tab")
+        self._do("space.new", {"name": session_name, "folder": str(self.tmp_path)})
+        if shown:
+            self._do("tab.select", {"id": shown})
+
+    def list_windows_in_session(self, session_name: str) -> list[str]:
+        """List the tab names of one space."""
+        tabs = self._find_space(session_name).get("tabs") or []
+        return [t["name"] for t in tabs if t.get("name")]
+
+    def _session_terminal(self, session_name: str) -> str:
+        """The focused terminal of a space's active tab."""
+        for tab in self._find_space(session_name).get("tabs") or []:
+            if tab.get("active"):
+                terminal = self._focused_terminal(tab)
+                if terminal:
+                    return terminal
+        raise RuntimeError(f"Session '{session_name}' has no active pane")
+
+    def session_pane_path(self, session_name: str) -> str:
+        """Return the cwd of the focused terminal in a space's active tab."""
+        terminal = self._session_terminal(session_name)
+        facts = json.loads(self.hc(["get", "--json", "--", terminal]).stdout)
+        return (facts.get("foreground") or {}).get("cwd") or facts.get("cwd") or ""
+
+    def send_keys_to_session(self, session_name: str, text: str) -> None:
+        """Type a command into the focused terminal of a space's active tab."""
+        self._send(self._session_terminal(session_name), text, True)
+
+
 class RexEnvironment(MuxEnvironment):
     """
     Rex-specific test environment.
@@ -1030,6 +1328,8 @@ def skip_if_backend_unavailable(backend: str):
     For tmux: Checks binary exists and `tmux -V` succeeds.
     For WezTerm: Checks binary exists and `wezterm cli list` succeeds
                 (requires WezTerm to be running).
+    For herdr-app: Checks herdr-app and hc exist. Each test starts its own
+                   core and window.
     For Rex: Checks the binary exists. Each test starts its own server.
 
     This ensures CI environments without WezTerm can still run tmux tests.
@@ -1050,18 +1350,23 @@ def skip_if_backend_unavailable(backend: str):
         )
         if result.returncode != 0:
             pytest.skip("wezterm not running or not available")
+    elif backend == "herdr-app":
+        for executable in ("herdr-app", "hc"):
+            if not shutil.which(executable):
+                pytest.skip(f"{executable} not installed")
     elif backend == "rex":
         if not shutil.which("rex"):
             pytest.skip("rex not installed")
 
 
 # Type alias for tests that accept any backend
-MuxEnv = Union[TmuxEnvironment, WezTermEnvironment, RexEnvironment]
+MuxEnv = Union[TmuxEnvironment, WezTermEnvironment, HerdrAppEnvironment, RexEnvironment]
 
 # Test environment class for each --backend value
 MUX_ENVIRONMENTS: dict[str, type[MuxEnvironment]] = {
     "tmux": TmuxEnvironment,
     "wezterm": WezTermEnvironment,
+    "herdr-app": HerdrAppEnvironment,
     "rex": RexEnvironment,
 }
 
@@ -1407,7 +1712,7 @@ def pytest_addoption(parser):
         "--backend",
         action="store",
         default=None,
-        help="Multiplexer backend to test: tmux, wezterm, rex, or several (comma-separated)",
+        help="Multiplexer backend to test: tmux, wezterm, herdr-app, rex, or several (comma-separated)",
     )
 
 

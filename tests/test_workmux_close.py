@@ -187,7 +187,7 @@ def test_close_window_in_parent_session(
 ):
     """Close finds a window in its parent session from another session."""
     env = mux_server
-    if env.backend_name not in ("tmux", "rex"):
+    if env.backend_name not in ("tmux", "herdr-app", "rex"):
         pytest.skip(f"{env.backend_name} has no parent sessions")
     branch_name = "feature/parent-session-close"
     session_name = "prs-close"

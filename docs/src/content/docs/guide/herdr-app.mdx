@@ -30,7 +30,13 @@ workmux changes the layout through `herdr-app do` and reads it with `herdr-app l
 
 ## Testing
 
-A unit test drives every backend method against the running herdr-app. Run the test binary from a terminal inside herdr-app; it creates tabs and spaces named `wmt-*` and closes them again:
+The integration tests can run against herdr-app. Each test starts its own herdr-core and a minimized herdr-app window, like the Rex tests start their own server, so your own spaces are never touched:
+
+```bash
+just itest --backend=herdr-app
+```
+
+A unit test also drives every backend method against the herdr-app you run it in. It creates tabs and spaces named `wmt-*` and closes them again:
 
 ```bash
 cargo test every_method_against_the_running_app -- --ignored

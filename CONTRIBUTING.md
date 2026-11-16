@@ -18,6 +18,7 @@ To avoid wasted effort, open an issue first to discuss your proposed change.
 - tmux (required for tests)
 - WezTerm (optional, for testing WezTerm backend)
 - Zellij (optional, for testing Zellij backend)
+- herdr-app (optional, for testing the herdr-app backend)
 - Rex (optional, for testing the Rex backend)
 
 ## Development setup
@@ -63,6 +64,9 @@ By default, tests run against **tmux only**.
 ```bash
 # Test with WezTerm (requires WezTerm to be running)
 WORKMUX_TEST_BACKEND=wezterm just itest
+
+# Test with herdr-app (each test starts a private herdr-core and window)
+just itest --backend=herdr-app
 
 # Test with Rex (each test starts a private Rex server)
 just itest --backend=rex
