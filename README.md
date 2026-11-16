@@ -2914,9 +2914,8 @@ alternative terminal multiplexers:
   configuration.
 - **[Zellij](https://workmux.dev/guide/zellij)** (experimental) - For
   users who prefer Zellij. Detected automatically via `$ZELLIJ`.
-- **[herdr-app](https://workmux.dev/guide/herdr-app)** (experimental) - For
-  users of the herdr-app desktop app. Detected automatically via
-  `$HC_TERMINAL_ID`.
+- **[herdr-app](https://workmux.dev/guide/herdr-app)** - For users of the
+  herdr-app desktop app. Detected automatically via `$HC_TERMINAL_ID`.
 - **[Rex](https://workmux.dev/guide/rex)** (experimental) - For users of
   the Rex multiplexer. Detected automatically via `$REX_BLOCK`.
 
