@@ -24,17 +24,6 @@ use super::Multiplexer;
 use super::types::*;
 use super::util;
 
-/// Whether this process runs in an hc terminal.
-pub fn in_herdr_app_terminal() -> bool {
-    current_terminal().is_some()
-}
-
-fn current_terminal() -> Option<String> {
-    std::env::var("HC_TERMINAL_ID")
-        .ok()
-        .filter(|id| !id.trim().is_empty())
-}
-
 /// Run a program and return its trimmed stdout. herdr-app reports errors on
 /// stdout and hc on stderr, so a failure carries both.
 fn run(cmd: &mut Command, input: Option<&str>) -> Result<String> {
@@ -331,7 +320,7 @@ impl HerdrAppBackend {
     fn snapshot(&self) -> Result<Snapshot> {
         let output = run(Command::new("herdr-app").arg("ls"), None)
             .context("Failed to list herdr-app spaces")?;
-        Snapshot::parse(&output, current_terminal().as_deref())
+        Snapshot::parse(&output, self.current_pane_id().as_deref())
     }
 
     /// Every terminal's pid, folder and foreground program, in one hc call.
@@ -463,7 +452,7 @@ impl Multiplexer for HerdrAppBackend {
     }
 
     fn current_pane_id(&self) -> Option<String> {
-        current_terminal()
+        std::env::var("HC_TERMINAL_ID").ok()
     }
 
     fn active_pane_id(&self) -> Option<String> {
@@ -479,7 +468,9 @@ impl Multiplexer for HerdrAppBackend {
     }
 
     fn get_client_active_pane_path(&self) -> Result<PathBuf> {
-        let terminal = current_terminal().ok_or_else(|| anyhow!("HC_TERMINAL_ID not set"))?;
+        let terminal = self
+            .current_pane_id()
+            .ok_or_else(|| anyhow!("HC_TERMINAL_ID not set"))?;
         let path = self
             .terminal_facts()?
             .get(&terminal)
@@ -662,7 +653,7 @@ impl Multiplexer for HerdrAppBackend {
     }
 
     fn current_window_name(&self) -> Result<Option<String>> {
-        let Some(terminal) = current_terminal() else {
+        let Some(terminal) = self.current_pane_id() else {
             return Ok(None);
         };
         Ok(self.snapshot()?.pane(&terminal).map(|p| p.tab.clone()))

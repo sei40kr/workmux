@@ -1130,7 +1130,7 @@ fn detect_backend_from_environment() -> BackendType {
             || std::env::var("ZELLIJ_SESSION_NAME").is_ok(),
         kitty: std::env::var("KITTY_WINDOW_ID").is_ok(),
         rex: rex::in_rex_terminal(),
-        herdr_app: herdr_app::in_herdr_app_terminal(),
+        herdr_app: std::env::var("HC_TERMINAL_ID").is_ok(),
     })
 }
 

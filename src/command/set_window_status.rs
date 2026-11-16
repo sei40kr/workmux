@@ -282,7 +282,7 @@ impl StatusBackendSignals {
                 || std::env::var_os("ZELLIJ_SESSION_NAME").is_some(),
             kitty: std::env::var_os("KITTY_WINDOW_ID").is_some(),
             rex: crate::multiplexer::rex::in_rex_terminal(),
-            herdr_app: crate::multiplexer::herdr_app::in_herdr_app_terminal(),
+            herdr_app: std::env::var_os("HC_TERMINAL_ID").is_some(),
         }
     }
 
