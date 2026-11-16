@@ -267,8 +267,8 @@ struct StatusBackendSignals {
     wezterm: bool,
     zellij: bool,
     kitty: bool,
-    rex: bool,
     herdr_app: bool,
+    rex: bool,
 }
 
 impl StatusBackendSignals {
@@ -281,8 +281,8 @@ impl StatusBackendSignals {
                 || std::env::var_os("ZELLIJ_PANE_ID").is_some()
                 || std::env::var_os("ZELLIJ_SESSION_NAME").is_some(),
             kitty: std::env::var_os("KITTY_WINDOW_ID").is_some(),
-            rex: crate::multiplexer::rex::in_rex_terminal(),
             herdr_app: std::env::var_os("HC_TERMINAL_ID").is_some(),
+            rex: crate::multiplexer::rex::in_rex_terminal(),
         }
     }
 
@@ -292,8 +292,8 @@ impl StatusBackendSignals {
             || self.wezterm
             || self.zellij
             || self.kitty
-            || self.rex
             || self.herdr_app
+            || self.rex
     }
 }
 

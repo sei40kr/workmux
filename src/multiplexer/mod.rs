@@ -1072,8 +1072,8 @@ pub trait Multiplexer: Send + Sync {
 /// 3. `$WEZTERM_PANE` set → WezTerm
 /// 4. `$ZELLIJ`, `$ZELLIJ_PANE_ID`, or `$ZELLIJ_SESSION_NAME` set → Zellij
 /// 5. `$KITTY_WINDOW_ID` set → Kitty
-/// 6. `$REX_BLOCK` set (and not empty) → Rex
-/// 7. `$HC_TERMINAL_ID` set (and not empty) → herdr-app
+/// 6. `$HC_TERMINAL_ID` set → herdr-app
+/// 7. `$REX_BLOCK` set (and not empty) → Rex
 /// 8. None → defaults to tmux (for backward compatibility)
 ///
 /// This ordering ensures that running tmux inside kitty (or wezterm) correctly
@@ -1117,8 +1117,8 @@ struct BackendSignals {
     wezterm: bool,
     zellij: bool,
     kitty: bool,
-    rex: bool,
     herdr_app: bool,
+    rex: bool,
 }
 
 fn detect_backend_from_environment() -> BackendType {
@@ -1129,8 +1129,8 @@ fn detect_backend_from_environment() -> BackendType {
             || std::env::var("ZELLIJ_PANE_ID").is_ok()
             || std::env::var("ZELLIJ_SESSION_NAME").is_ok(),
         kitty: std::env::var("KITTY_WINDOW_ID").is_ok(),
-        rex: rex::in_rex_terminal(),
         herdr_app: std::env::var("HC_TERMINAL_ID").is_ok(),
+        rex: rex::in_rex_terminal(),
     })
 }
 
@@ -1152,16 +1152,16 @@ fn resolve_backend(signals: BackendSignals) -> BackendType {
         return BackendType::Kitty;
     }
 
+    // After the multiplexers above, because every terminal started from an
+    // hc terminal inherits HC_TERMINAL_ID
+    if signals.herdr_app {
+        return BackendType::HerdrApp;
+    }
+
     // Last, because every terminal started from a Rex pane inherits
     // REX_BLOCK: any other multiplexer seen here is nested inside Rex
     if signals.rex {
         return BackendType::Rex;
-    }
-
-    // Last for the same reason: terminals started from an hc terminal inherit
-    // HC_TERMINAL_ID
-    if signals.herdr_app {
-        return BackendType::HerdrApp;
     }
 
     BackendType::Tmux
@@ -1174,8 +1174,8 @@ pub fn create_backend(backend_type: BackendType) -> Arc<dyn Multiplexer> {
         BackendType::WezTerm => Arc::new(wezterm::WezTermBackend::new()),
         BackendType::Kitty => Arc::new(kitty::KittyBackend::new()),
         BackendType::Zellij => Arc::new(zellij::ZellijBackend::new()),
-        BackendType::Rex => Arc::new(rex::RexBackend::new()),
         BackendType::HerdrApp => Arc::new(herdr_app::HerdrAppBackend::new()),
+        BackendType::Rex => Arc::new(rex::RexBackend::new()),
     }
 }
 
@@ -1389,6 +1389,29 @@ mod tests {
     }
 
     #[test]
+    fn herdr_app_only() {
+        assert_eq!(
+            resolve_backend(BackendSignals {
+                herdr_app: true,
+                ..Default::default()
+            }),
+            BackendType::HerdrApp
+        );
+    }
+
+    #[test]
+    fn tmux_inside_herdr_app() {
+        assert_eq!(
+            resolve_backend(BackendSignals {
+                tmux: true,
+                herdr_app: true,
+                ..Default::default()
+            }),
+            BackendType::Tmux
+        );
+    }
+
+    #[test]
     fn wezterm_inside_rex() {
         assert_eq!(
             resolve_backend(BackendSignals {
@@ -1429,29 +1452,6 @@ mod tests {
             resolve_backend(BackendSignals {
                 tmux: true,
                 rex: true,
-                ..Default::default()
-            }),
-            BackendType::Tmux
-        );
-    }
-
-    #[test]
-    fn herdr_app_only() {
-        assert_eq!(
-            resolve_backend(BackendSignals {
-                herdr_app: true,
-                ..Default::default()
-            }),
-            BackendType::HerdrApp
-        );
-    }
-
-    #[test]
-    fn tmux_inside_herdr_app() {
-        assert_eq!(
-            resolve_backend(BackendSignals {
-                tmux: true,
-                herdr_app: true,
                 ..Default::default()
             }),
             BackendType::Tmux
