@@ -296,9 +296,7 @@ impl TerminalFacts {
     }
 }
 
-/// hc key names for a text fragment, or None when hc has no key for a
-/// character. hc presses keys by name and has none for shifted symbols
-/// (`!`, `$`, `|`, ...) or non-ASCII text.
+/// hc key names that type `text`, or None when a character has no key.
 fn text_keys(text: &str) -> Option<Vec<String>> {
     text.chars()
         .map(|c| match c {
@@ -369,8 +367,8 @@ impl HerdrAppBackend {
             .ok_or_else(|| anyhow!("herdr-app did not report the new terminal"))
     }
 
-    /// herdr-app shows every new tab and space. workmux creates them in the
-    /// background and shows them itself when asked, so put the shown tab back.
+    /// The trait creates windows and sessions without showing them, but
+    /// herdr-app shows every new tab and space, so put the shown tab back.
     fn create_in_background(&self, command: &str, args: Value) -> Result<String> {
         let shown = self
             .app_do_status()
@@ -779,7 +777,7 @@ impl Multiplexer for HerdrAppBackend {
 
     /// `hc send` pastes the text and presses Enter in one call, so any text works.
     fn send_keys(&self, pane_id: &str, command: &str) -> Result<()> {
-        // --force: type into a program waiting on a dialog, like the other backends
+        // --force: type even into a program waiting on a dialog
         hc(&["send", "--force", "--", pane_id, command]).context("Failed to send keys to pane")?;
         Ok(())
     }
